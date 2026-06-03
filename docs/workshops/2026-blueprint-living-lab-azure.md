@@ -12,7 +12,7 @@
 
 **Como:** **6 fases cumulativas** (F1–F6), cada uma entregando uma branch Git executável via CI/CD do GitHub Actions, mais artefatos didáticos consistentes (README aluno, Portal Guide passo-a-passo, Speaker Notes, slides, vídeo intro, branch executável).
 
-**Custo do evento:** ~US$50-80 (APIM Developer compartilhado) + US$5-15 por aluno (Service Bus, Functions, Container Apps, App Insights). Mitigação obrigatória: Budget Alerts + script teardown ao final.
+**Custo do evento:** ~US$0 compartilhado (gateway agora é YARP em código, custo zero — ver ADE-004) + US$5-15 por aluno (Service Bus, Functions, Container Apps, App Insights). Mitigação obrigatória: Budget Alerts + script teardown ao final.
 
 **Próximo passo:** `@pm` cria **EPIC-002 — Living Lab Workshop** com 7 stories (6 fases + 1 transversal Flow Visualizer) referenciando este documento.
 
@@ -35,15 +35,15 @@
             │ compra v1 (original)             │ compra v2 (didática)
             ▼                                  ▼
 ┌─────────────────────────┐         ┌──────────────────────────────────┐
-│  Node/Express (intocado)│         │  APIM Developer (gateway)        │
+│  Node/Express (intocado)│         │  Gateway YARP (.NET, Container)  │
 │  → SQL Server           │         │  → Function .NET (entrypoint)    │
 │                         │         │  → Service Bus (fila + DLQ)      │
 └─────────────────────────┘         │  → Function .NET (consumer)      │
                                     │  → n8n (orquestração)            │
-                                    │  → SQL Server (mesma DB, marker) │
+                                    │  → Azure SQL DB (mesma DB, marker)│
                                     │  + Chatbot (LLM via MCP server)  │
-                                    │  + External ID (auth customer)   │
-                                    │  + App Registration (auth admin) │
+                                    │  + App Reg workforce + MSAL/Easy │
+                                    │    Auth (auth customer + admin)  │
                                     │  + App Insights (correlation IDs)│
                                     └──────────────────────────────────┘
 ```
@@ -59,11 +59,12 @@ Todo aluno termina com o app rodando em sua subscription Azure, com o **fluxo v2
 | Componente | Tier | Custo estimado | Justificativa pedagógica |
 |---|---|---|---|
 | **Azure Service Bus** | Standard | ~US$10/mês base | Messaging assíncrono, queues, topics, DLQ |
-| **APIM** | **Developer** | ~US$50/mês flat (sem SLA) | Libera `rate-limit-by-key`, cache, transformations, JWT validation, VNet — superfície completa de policies |
+| **Gateway YARP (ASP.NET Core)** | **Open-source self-hosted** (Container App Consumption, por aluno) | **US$0** (scale-to-zero) | Gateway em código C# — rate-limit, cache, transform, JWT validation reimplementados em `Yarp.ReverseProxy` + middleware ASP.NET Core. Transparência didática ("gateway por dentro") e reforço do fio condutor "microsserviço .NET". Substitui APIM Developer — ver ADE-004 |
 | **Azure Functions** | Consumption (.NET 8 isolated) | ~grátis em 1M execs/mês | Serverless, bindings, durable functions |
 | **n8n self-hosted** | Azure Container Apps (Consumption) | ~US$5-15/mês | Workflow automation low-code + ensina containers |
-| **Microsoft Entra External ID** | Free tier (50K MAU) | US$0 | CIAM moderno, OIDC, social login |
-| **App Registrations (Entra ID interno)** | Free | US$0 | OAuth2 auth code flow para camada admin |
+| **App Registration (tenant workforce do aluno)** | Free | US$0 | OIDC/OAuth2 code flow + PKCE via MSAL.js; social login (Google/GitHub) federado; sem tenant External ID. Substitui Entra External ID — ver ADE-005 |
+| **Easy Auth (App Service Authentication)** | Free | US$0 | Proteção opcional/complementar do front em App Service; usa a App Registration workforce. Alternativa "zero-código-de-auth" — ver ADE-005 |
+| **App Roles (camada admin, mesmo tenant workforce)** | Free | US$0 | App Roles (`Admin`, `Operator`, `Viewer`) na App Registration admin |
 | **MCP Server** | Auto-hospedado em Function .NET | Incluído | Protocolo de tools para LLM — assunto-quente 2026 |
 | **Chatbot frontend** | Componente React | US$0 | Integração LLM no produto |
 | **LLM provider** | Google Gemini 2.0 Flash | US$0 | Único LLM moderno gratuito e estável em escala de turma; sem cartão, sem aprovação |
@@ -73,9 +74,9 @@ Todo aluno termina com o app rodando em sua subscription Azure, com o **fluxo v2
 
 ### Cost Model
 
-- **Cenário A — APIM compartilhado** (1 instância Developer para todos os alunos, products/subscriptions por aluno): **~US$50-80 total** para todo o evento. ✅ Recomendado e adotado.
-- **Cenário B (rejeitado)** — APIM por aluno: inviável para grupos > 5.
-- **Demais recursos por aluno:** US$5-15 em 40h.
+- **Custo compartilhado do evento: ~US$0.** Com a substituição do APIM Developer por YARP em código (ADE-004), o gateway deixa de ser um recurso compartilhado: passa a ser um Container App por aluno em Consumption (scale-to-zero ~US$0). Não há mais o "cenário A — APIM compartilhado (~US$50-80)"; ele deixou de existir. O único custo compartilhado residual é o domínio personalizado opcional (~US$12/ano), que não é obrigatório.
+- **Demais recursos por aluno (incl. o Container App do gateway YARP):** US$5-15 em 40h.
+- **Identidade (App Registration workforce + Easy Auth, ADE-005):** US$0, sem tenant External ID compartilhado para provisionar.
 - **Mitigação obrigatória:** Azure Budget Alert + script `teardown.ps1` que destrói RG inteiro ao final.
 
 ---
@@ -87,8 +88,8 @@ Todo aluno termina com o app rodando em sua subscription Azure, com o **fluxo v2
 | # | Branch | Tempo | Tema | Novidade |
 |---|---|---|---|---|
 | F1 | `phase-01-servicebus-functions` | 6h | Mensageria desacoplada | Service Bus + Function entry + Function consumer |
-| F2 | `phase-02-apim` | 6h | Gateway profissional | APIM Developer + policies (rate-limit-by-key, cache, transformations) |
-| F3 | `phase-03-identity` | 6h | Identidade moderna | External ID (customer) + App Registration (admin) substituem JWT no fluxo v2 |
+| F2 | `phase-02-gateway` | 6h | Gateway em código | Gateway YARP (.NET) em Container App — rate-limit, cache, transform, JWT validation em código (ver ADE-004) |
+| F3 | `phase-03-identity` | 6h | Identidade moderna | App Registration (tenant workforce) + MSAL.js (PKCE) + Easy Auth substituem JWT no fluxo v2; sem tenant externo (ver ADE-005) |
 | F4 | `phase-04-orchestration` | 6h | Workflow visual | n8n em Container Apps; orquestra notificação pós-compra |
 | F5 | `phase-05-ai-mcp` | 8h | Inteligência conversacional | MCP server (Function .NET) + chatbot + Gemini 2.0 Flash |
 | F6 | `phase-06-flow-visualizer` | 8h | Observabilidade didática | Flow Visualizer UI com correlation ID animado em tempo real via SignalR |
@@ -317,21 +318,21 @@ jobs:
 
 ---
 
-### F2 — Gateway Profissional (esqueleto)
+### F2 — Gateway em Código YARP (esqueleto)
 
-**Branch:** `phase-02-apim` · **Duração:** 6h · **Novidade:** APIM Developer + policies
+**Branch:** `phase-02-gateway` · **Duração:** 6h · **Novidade:** Gateway YARP (.NET) em Container App (ver ADE-004)
 
-**Escopo:** introduzir APIM Developer compartilhado (1 instância para a turma, products/subscriptions/keys por aluno) à frente das Functions de F1. Ensinar policies (`rate-limit-by-key`, `cache-lookup`/`cache-store`, `validate-jwt`, `cors`, `set-header`, `rewrite-uri`). Aluno cria um produto, atribui sua function como API backend, gera subscription key, testa via Postman/curl.
+**Escopo:** introduzir um gateway **YARP (`Yarp.ReverseProxy`) em ASP.NET Core**, hospedado em **Azure Container App (Consumption, por aluno)** à frente das Functions de F1. Em vez de policies XML proprietárias do APIM, o aluno **lê e escreve em C#** os equivalentes (contrato de paridade em ADE-004 Invariante 3): `rate-limit-by-key` → `AddRateLimiter` (partição por chave); `cache` → `AddOutputCache`; `set-header` (ex.: `X-Correlation-ID`) → YARP `Transforms`/`AddRequestTransform`; `rewrite-uri`/path strip → `PathRemovePrefix`/`PathPattern`; `cors` → `AddCors`/`UseCors` (origem = front); `validate-jwt` → `AddJwtBearer` (ativado só em F3, ADE-005). O projeto YARP é versionado no repo e deployado via mesmo CI/CD por fase. Hosting default é Container App; Function .NET isolated fica como alternativa documentada (ponto de validação no design da story 2.2). Custo ~US$0, deploy em segundos (sem os 30-45min de provisioning do APIM).
 
-**DoD aluno (resumo):** consegue chamar compra v2 via URL do APIM, ver policy de rate-limit-by-key bater, ver cache responder em 2ª chamada, ver tracing end-to-end no APIM "Test" console + App Insights.
+**DoD aluno (resumo):** sobe o Container App do gateway YARP por aluno; chama compra v2 via URL do gateway; vê rate limiter em código retornar 429 acima do limite; vê output cache responder a 2ª chamada `GET` mais rápido (header de cache hit); CORS restrito ao front e `X-Correlation-ID` propagado downstream; tracing end-to-end via logs do Container App + App Insights. **Nota didática:** "em produção corporativa o equivalente gerenciado é o APIM; aqui ensinamos o conceito em código para transparência" (vira slide/SPEAKER-NOTES).
 
 ### F3 — Identidade Moderna (esqueleto)
 
-**Branch:** `phase-03-identity` · **Duração:** 6h · **Novidade:** External ID (customer) + App Registration (admin)
+**Branch:** `phase-03-identity` · **Duração:** 6h · **Novidade:** App Registration (tenant workforce) + MSAL.js (PKCE) + Easy Auth — sem tenant externo (ver ADE-005)
 
-**Escopo:** introduzir Microsoft Entra External ID como provedor de identidade no fluxo v2 (substitui o JWT bcrypt+local do v1, que permanece intacto para comparação). App Registration interno para camada admin do sistema. APIM passa a validar tokens do External ID via `validate-jwt` apontando para o discovery do issuer. **Decisão arquitetural pendente:** mapping entre IDs Entra (GUID) e IDs locais (int) — discutir com `@architect` durante a fase.
+**Escopo:** introduzir identidade no fluxo v2 usando o **tenant Entra ID workforce que o aluno já tem** (vinculado à sua subscription Azure), via **App Registration** — sem tenant External ID e sem user flows. Caminho recomendado: **App Registration tipo SPA + MSAL.js (`@azure/msal-browser`/`-react`) com Authorization Code Flow + PKCE** no front; o **gateway YARP valida o JWT** (`AddJwtBearer`, ADE-004 Inv 4) contra o discovery do issuer workforce, extrai o claim `oid` e o propaga downstream (header `X-Entra-OID`). Social login (Google/GitHub) federado na App Registration. **Easy Auth (App Service Authentication)** fica como alternativa "zero-código-de-auth" e/ou camada complementar de proteção do front em App Service (callback `/.auth/login/aad/callback`, secret gerenciado). Camada admin = App Roles (`Admin`/`Operator`/`Viewer`) no mesmo tenant workforce. O v1 (bcrypt+JWT local) permanece intacto para comparação. **Mapping de identidade resolvido:** o claim `oid` (GUID estável) é a chave — coluna aditiva `entra_oid` em `purchases`/`users` (ADE-005 Inv 3); não há tabela de mapping a inventar.
 
-**DoD aluno (resumo):** login social via External ID → recebe token → chama APIM → policy valida JWT → Function v2 grava purchase com `entra_user_id`.
+**DoD aluno (resumo):** login OIDC/social via MSAL.js no SPA → recebe access token → chama o gateway YARP com `Authorization: Bearer` → YARP valida `iss`/`aud`/assinatura e extrai `oid` → Function v2 grava purchase com `entra_oid`. Nenhum tenant External ID provisionado.
 
 ### F4 — Workflow Visual (esqueleto)
 
@@ -353,9 +354,9 @@ jobs:
 
 **Branch:** `phase-06-flow-visualizer` · **Duração:** 8h · **Novidade:** Flow Visualizer UI com correlation ID animado em tempo real
 
-**Escopo:** nova rota `/flow` no frontend Vite. Diagrama dos componentes (APIM, Function entry, Service Bus, Function consumer, n8n, SQL) como nós. Ao executar compra v2, "bolinha" animada percorre o diagrama em tempo real, alimentada por SignalR. Backend: Function dedicada que consulta App Insights via SDK por correlation ID e empurra eventos via SignalR. Animação com framer-motion.
+**Escopo:** nova rota `/flow` no frontend Vite. Diagrama dos componentes (Gateway YARP, Function entry, Service Bus, Function consumer, n8n, SQL) como nós. Ao executar compra v2, "bolinha" animada percorre o diagrama em tempo real, alimentada por SignalR. Backend: Function dedicada que consulta App Insights via SDK por correlation ID e empurra eventos via SignalR. Animação com framer-motion.
 
-**DoD aluno (resumo):** compra v2 → vê bolinha percorrer APIM → SB → Function → n8n → SQL com tempo gasto em cada nó e payload inspecionável.
+**DoD aluno (resumo):** compra v2 → vê bolinha percorrer Gateway YARP → SB → Function → n8n → SQL com tempo gasto em cada nó e payload inspecionável.
 
 ---
 
@@ -366,7 +367,7 @@ jobs:
 ```
 main ──────────────────────────────────────────────── (estado pré-workshop, EPIC-001 done)
   └─ phase-01-servicebus-functions ──────────────────
-       └─ phase-02-apim ──────────────────────────────
+       └─ phase-02-gateway ───────────────────────────
             └─ phase-03-identity ─────────────────────
                  └─ phase-04-orchestration ───────────
                       └─ phase-05-ai-mcp ─────────────
@@ -441,24 +442,31 @@ Trocar LLM por env var (Gemini → Groq → Mistral) sem mexer no código do cha
 
 ## 8. Identity Strategy
 
-### Camada customer: Microsoft Entra External ID
+> **Re-escopo (ADE-005):** o Entra External ID foi removido. A identidade do v2 usa o **tenant Entra ID workforce que o aluno já possui** (vinculado à sua subscription Azure), via App Registration + MSAL.js (PKCE) + Easy Auth — sem tenant externo e sem user flows. Custo US$0.
 
-- Free tier 50K MAU (mais que suficiente para evento)
-- OIDC / OAuth2 padrão
-- Social login (Google, Microsoft, Apple) configurável
-- Substitui o `JWT + bcrypt local` apenas no fluxo v2 (v1 mantém para comparação didática)
+### Camada customer: App Registration no tenant workforce + MSAL.js (PKCE)
 
-### Camada admin: App Registration (Entra ID interno)
+- O aluno cria uma **App Registration tipo SPA** (`student-<iniciais>-v2`) no seu tenant workforce — não há tenant External ID nem user flows.
+- Front (SPA Vite/React) usa **`@azure/msal-browser`/`@azure/msal-react`** com **Authorization Code Flow + PKCE** (sem client secret no browser) para login e obtenção do access token.
+- O access token é enviado como `Authorization: Bearer` e **validado no gateway YARP** (`AddJwtBearer`, ADE-004 Inv 4) — ponto único de validação de identidade.
+- **Social login (Google/GitHub)** configurado como identity provider federado na App Registration — objetivo "social login / OIDC" preservado sem CIAM separado.
+- Substitui o `JWT + bcrypt local` apenas no fluxo v2 (v1 mantém para comparação didática).
 
-- OAuth2 Authorization Code Flow
-- Roles via App Roles (Admin, Operator, Viewer)
-- Tokens validados via APIM `validate-jwt` policy
+### Camada admin: App Roles no mesmo tenant workforce
 
-### Decisão arquitetural pendente
+- App Registration com **App Roles** (`Admin`, `Operator`, `Viewer`).
+- OAuth2 Authorization Code Flow.
+- Tokens validados no gateway YARP (`AddJwtBearer`), não em policy APIM.
 
-> **Como mapear IDs do Entra (GUID) para IDs locais (int) na tabela `purchases`?**
-> Opções: (a) tabela `user_identity_mapping` com pares (entra_oid ↔ user_id local); (b) coluna `entra_oid` direto em `users`; (c) duplicar registro de usuário em v2.
-> **Responsável:** `@architect` durante F3 design.
+### Easy Auth (App Service Authentication) — alternativa / camada complementar
+
+- Caminho alternativo "zero-código-de-auth": Easy Auth protege o App Service do front (login Entra automático), expõe `/.auth/me` e header `X-MS-CLIENT-PRINCIPAL`, callback `/.auth/login/aad/callback`, secret gerenciado pelo App Service (elegível a Key Vault, ADE-003 Inv 3).
+- Pressupõe **front em App Service** (recurso de App Service) — coerente com a baseline PaaS (ADE-003) após EPIC-001 S4.
+- Recomendação (ADE-005): usar MSAL.js como caminho principal (validação uniforme no gateway); Easy Auth como complemento opcional de proteção do front.
+
+### Mapping de identidade — RESOLVIDO (ADE-005, supersede ADE-001)
+
+> **O claim `oid` (Object ID, GUID estável do usuário no tenant workforce) é a chave canônica de identidade do v2.** A tabela `purchases`/`users` recebe a coluna aditiva e idempotente `entra_oid UNIQUEIDENTIFIER` (+ índice), populada com o `oid` propagado pelo gateway (`X-Entra-OID`). **Não há tabela de mapping nem estratégia GUID↔int a inventar** — a decisão antes pendente está fechada em ADE-005 Invariante 3.
 
 ---
 
@@ -466,12 +474,12 @@ Trocar LLM por env var (Gemini → Groq → Mistral) sem mexer no código do cha
 
 | # | Risco | Impacto | Mitigação |
 |---|---|---|---|
-| 1 | Custo Azure ultrapassa budget do evento | Alto | APIM compartilhado + Budget Alert + script teardown ao final |
-| 2 | Atrito de setup External ID em F3 | Médio | Tenant External ID pré-criado pelo instrutor, fornecido aos alunos |
+| 1 | Custo Azure ultrapassa budget do evento | Alto | Gateway YARP custo ~US$0 (sem APIM, ADE-004) + Budget Alert + script teardown ao final |
+| 2 | ~~Atrito de setup External ID em F3~~ — **ELIMINADO** (ADE-005) | — | Sem tenant External ID nem user flows; usa o tenant workforce que o aluno já tem. Risco fechado. |
 | 3 | n8n exposto sem auth na free config | Alto | Basic auth obrigatório no provisioning; documentado em PORTAL-GUIDE |
 | 4 | MCP é tecnologia recente — quebra de spec | Médio | Pinning de versão do SDK MCP em todas as fases |
 | 5 | Drift entre branches (hotfix em F1 após F2 criada) | Médio | Congelar `main` pré-workshop; cherry-pick scriptado |
-| 6 | Mapping de IDs Entra ↔ local | Médio | Decisão arquitetural junto com `@architect` em F3 |
+| 6 | ~~Mapping de IDs Entra ↔ local~~ — **RESOLVIDO** (ADE-005) | — | Claim `oid` é a chave; coluna aditiva `entra_oid`. Sem tabela de mapping. Risco fechado. |
 | 7 | 40h de workshop causa fadiga | Médio | Formato sugerido: 4 finais-de-semana × 10h ou 5 dias × 8h |
 | 8 | Gemini cai durante aula F5 | Alto | Fallback Groq + cache local pré-configurado |
 | 9 | Cold start de Functions trava demo ao vivo | Baixo | Warmup automático 5min antes de cada bloco hands-on |
@@ -488,7 +496,8 @@ Trocar LLM por env var (Gemini → Groq → Mistral) sem mexer no código do cha
 | Function App (Consumption) | ~US$0 | Dentro de 1M execuções/mês |
 | Service Bus Standard | ~US$2-5 | Pro-rata para 1-2 meses |
 | Container App (n8n) | ~US$3-8 | Consumption scale-to-zero |
-| SQL Server | US$0 | Compartilhado com app existente |
+| Container App (gateway YARP) | ~US$0 | Consumption scale-to-zero (ADE-004); substitui o APIM compartilhado |
+| Azure SQL Database | US$0 | Mesma DB do v1 (estado pós-EPIC-001 S4); v2 exige Azure SQL DB, não SQL em VM (ADE-003 Inv 2) |
 | App Insights | US$0-2 | Pay-per-GB ingerido |
 | SignalR Service | US$0 | Free tier 20 conexões |
 | Storage (Function backing) | ~US$0.50 | Trivial |
@@ -498,10 +507,10 @@ Trocar LLM por env var (Gemini → Groq → Mistral) sem mexer no código do cha
 
 | Recurso | Custo |
 |---|---|
-| APIM Developer (1 instância) | ~US$50-80 (pro-rata 1-2 meses) |
-| Tenant External ID | US$0 |
+| Gateway (antes APIM Developer) | **US$0** — agora YARP em Container App por aluno (ADE-004); deixou de ser recurso compartilhado |
+| Identidade (antes tenant External ID) | US$0 — agora tenant workforce do aluno + App Registration (ADE-005); nada compartilhado a provisionar |
 | Domínio personalizado (opcional) | ~US$12/ano |
-| **Total compartilhado** | **~US$50-95** |
+| **Total compartilhado** | **~US$0** (apenas o domínio opcional ~US$12/ano, se adotado) |
 
 ### Guard rails obrigatórios
 
@@ -522,8 +531,8 @@ Este blueprint está pronto para virar epic. Sugerido:
 | Story | Título | Tipo | Pré-req |
 |---|---|---|---|
 | 2.1 | F1 — Service Bus + Functions | Phase | EPIC-001 done |
-| 2.2 | F2 — APIM Developer + policies | Phase | 2.1 |
-| 2.3 | F3 — External ID + App Registration | Phase | 2.2 |
+| 2.2 | F2 — Gateway YARP + policies em código | Phase | 2.1 |
+| 2.3 | F3 — App Registration + MSAL/Easy Auth | Phase | 2.2 |
 | 2.4 | F4 — n8n em Container Apps | Phase | 2.3 |
 | 2.5 | F5 — MCP server + chatbot + Gemini | Phase | 2.4 |
 | 2.6 | F6 — Flow Visualizer | Phase | 2.5 |
@@ -542,21 +551,28 @@ Este blueprint está pronto para virar epic. Sugerido:
 | 1 | Hospedagem n8n | Azure Container Apps (Consumption) com basic auth |
 | 2 | LLM padrão | Gemini 2.0 Flash + MCP para portabilidade |
 | 3 | Quantas fases | 6 (F1-F6) + merge final |
-| 4 | Escopo External ID | Substitui JWT só no v2; v1 mantém p/ comparação |
+| 4 | Escopo identidade v2 | App Registration (tenant workforce) + MSAL/Easy Auth substitui JWT só no v2; v1 mantém p/ comparação. Sem External ID (re-escopo ADE-005) |
 | 5 | Tools do MCP | `consultar_disponibilidade`, `verificar_ingresso`, `consultar_bracket` |
 | 6 | Flow Visualizer real-time | SignalR free tier + fallback polling |
-| 7 | Custo + APIM | Developer compartilhado, products/subs por aluno |
+| 7 | Gateway + custo | **Sem APIM** — gateway YARP em código (.NET) em Container App por aluno, custo ~US$0; custo compartilhado do gateway eliminado (re-escopo ADE-004) |
 | 8 | Pré-req aluno | C# básico + Git + Azure free trial US$200 |
 | 9 | Audiência | Devs polyglot com background cloud (não exige .NET prévio) |
 | 10 | Material por fase | 6 artefatos: README + PORTAL-GUIDE + SPEAKER-NOTES + slides + vídeo + branch |
+
+### Decisões resolvidas pós-blueprint (re-escopo 2026-06-03)
+
+| Decisão | Resolução | Ref |
+|---|---|---|
+| Mapping IDs Entra ↔ local | **RESOLVIDA** — claim `oid` é a chave; coluna aditiva `entra_oid` (sem tabela de mapping) | ADE-005 (supersede ADE-001) |
+| Gateway (APIM vs código) | **RESOLVIDA** — YARP em código, sem APIM | ADE-004 |
+| Identidade (External ID vs workforce) | **RESOLVIDA** — App Registration tenant workforce + MSAL/Easy Auth | ADE-005 |
 
 ### Decisões pendentes (carry-forward para fases específicas)
 
 | Decisão | Quando resolver | Responsável |
 |---|---|---|
-| Mapping IDs Entra ↔ local | F3 design | `@architect` |
 | Formato calendário (4×10h ou 5×8h) | Pré-evento | `@pm` |
-| Custom domain APIM (opcional) | Pré-evento | `@devops` |
+| Custom domain do gateway (opcional) | Pré-evento | `@devops` |
 | Pinning de versão MCP SDK | F5 design | `@architect` |
 
 ### FAQ antecipado para alunos

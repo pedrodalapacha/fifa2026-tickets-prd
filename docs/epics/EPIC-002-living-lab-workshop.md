@@ -22,7 +22,7 @@ Os alunos não criam um "hello world" descartável. Evoluem um produto real em 6
 
 - **6 fases cumulativas** (F1–F6) cobrindo o ciclo completo de arquitetura Azure-native moderna
 - **Backend Node + frontend Vite + SQL Server permanecem intocados** — novos componentes coexistem em fluxo v2 paralelo
-- **Stack Azure-Native fechado:** Service Bus Standard · APIM Developer (compartilhado) · Functions Consumption (.NET 8 isolated) · Container Apps · External ID + App Registration · MCP server · Gemini 2.0 Flash · App Insights · SignalR free tier
+- **Stack Azure-Native fechado:** Service Bus Standard · Gateway YARP (.NET) em Container App por aluno (substitui APIM Developer — ADE-004) · Functions Consumption (.NET 8 isolated) · Container Apps · App Registration (tenant workforce) + MSAL/Easy Auth (substitui External ID — ADE-005) · MCP server · Gemini 2.0 Flash · App Insights · SignalR free tier
 - **6 artefatos por fase** (obrigatórios): README aluno · PORTAL-GUIDE · SPEAKER-NOTES · slides · vídeo intro · branch executável com CI/CD
 - **Provisioning sempre via Portal Azure passo-a-passo** (Bicep vira apêndice opcional)
 - **CI/CD por fase** via GitHub Actions com branches cumulativas (`phase-01-…` → `phase-02-…` → … → `main`)
@@ -45,6 +45,10 @@ Reservado para epic posterior ou stories independentes:
 - ✅ Manter propósito didático visível em cada fase
 - ✅ Evento gratuito — guard rails de custo obrigatórios
 
+## Pré-condições do epic (pré-flight)
+
+- ⛔ **EPIC-001 S4 concluído — Azure SQL Database ativa (não SQL em VM)** antes de iniciar F1. **Restrição física, não preferencial** (ADE-003 Inv 2): Azure Functions em Consumption plan não estão em VNet e não alcançam SQL em VM com IP privado. Sem Azure SQL DB, F1 não consegue gravar no banco. Confirmar no pré-flight checklist do aluno.
+
 ## Success criteria
 
 | # | Critério | Verificação |
@@ -52,7 +56,7 @@ Reservado para epic posterior ou stories independentes:
 | SC-1 | Aluno completa as 6 fases dentro das 40h alocadas | Cronômetro por bloco; checkpoint ao final de cada fase |
 | SC-2 | App permanece funcional em cada fase (estados intermediários válidos) | Smoke test fluxo v1 + fluxo v2 ao final de cada fase |
 | SC-3 | Aluno termina F6 com Flow Visualizer mostrando compra atravessando os 6 serviços | Demo individual ao final do workshop |
-| SC-4 | Custo total compartilhado (APIM Developer + tenant) ≤ US$95 | Azure Cost Management ao final do evento |
+| SC-4 | Custo total compartilhado do evento ~US$0 (gateway YARP per-aluno em Container App, sem APIM — ADE-004; identidade via tenant workforce, sem External ID — ADE-005; só sobra domínio opcional ~US$12/ano) | Azure Cost Management ao final do evento |
 | SC-5 | Custo por aluno ≤ US$15 nos 40h | Budget Alert + script teardown |
 | SC-6 | NPS > 8/10 entre alunos | Pesquisa pós-evento |
 
@@ -61,8 +65,8 @@ Reservado para epic posterior ou stories independentes:
 | # | ID | Título | Branch destino | Estimativa | Executor primário | Quality gate |
 |---|---|---|---|---|---|---|
 | S1 | 2.1 | F1 — Service Bus + Functions | `phase-01-servicebus-functions` | 6h | @dev | @architect |
-| S2 | 2.2 | F2 — APIM Developer + policies completas | `phase-02-apim` | 6h | @dev | @architect |
-| S3 | 2.3 | F3 — External ID + App Registration | `phase-03-identity` | 6h | @dev | @architect |
+| S2 | 2.2 | F2 — Gateway YARP + policies em código | `phase-02-gateway` | 6h | @dev | @architect |
+| S3 | 2.3 | F3 — App Registration + MSAL/Easy Auth | `phase-03-identity` | 6h | @dev | @architect |
 | S4 | 2.4 | F4 — n8n self-hosted em Container Apps | `phase-04-orchestration` | 6h | @devops | @architect |
 | S5 | 2.5 | F5 — MCP server + chatbot + Gemini 2.0 Flash | `phase-05-ai-mcp` | 8h | @dev | @architect |
 | S6 | 2.6 | F6 — Flow Visualizer (correlation ID animado) | `phase-06-flow-visualizer` | 8h | @dev | @architect |
@@ -89,8 +93,8 @@ Cada story de fase entrega **6 artefatos** obrigatórios:
 
 ```
 S1 (F1: Service Bus + Functions)
-   └─> S2 (F2: APIM Developer)
-        └─> S3 (F3: External ID + App Reg)
+   └─> S2 (F2: Gateway YARP em código)
+        └─> S3 (F3: App Reg workforce + MSAL/Easy Auth)
              └─> S4 (F4: n8n em Container Apps)
                   └─> S5 (F5: MCP + Chatbot + Gemini)
                        └─> S6 (F6: Flow Visualizer)
@@ -106,8 +110,8 @@ S7 (Materiais didáticos) ─── paralela a S1–S6 (cada fase entrega seus 5
 | Story | Artefatos que reusa |
 |---|---|
 | S1 (F1) | `fifa2026-api/src/` (referência de schema), `purchases` table (extensão com `source` + `correlation_id`), `.github/workflows/deploy-backend.yml` (pattern de CI/CD) |
-| S2 (F2) | Function App de S1; padrão de policy library (a ser criado em S2 e reusado em S3+) |
-| S3 (F3) | `fifa2026-api/src/middleware/auth.js` (referência do JWT atual para comparação didática); APIM de S2 |
+| S2 (F2) | Function App de S1; projeto YARP versionado no repo (criado em S2, reusado/estendido em S3+ para validação de JWT) |
+| S3 (F3) | `fifa2026-api/src/middleware/auth.js` (referência do JWT atual para comparação didática); gateway YARP de S2 (recebe `AddJwtBearer`) |
 | S4 (F4) | Container Apps pattern (a ser criado em S4 e reusado se necessário); Service Bus de S1 (n8n consome) |
 | S5 (F5) | Function pattern de S1 (MCP server é Function); SQL como fonte de dados das tools |
 | S6 (F6) | App Insights (já presente desde S1); SignalR é novo; React + framer-motion já em `Lovable/.../package.json` |
@@ -117,12 +121,12 @@ S7 (Materiais didáticos) ─── paralela a S1–S6 (cada fase entrega seus 5
 
 | # | Risco | Probabilidade | Impacto | Mitigação |
 |---|---|---|---|---|
-| 1 | Custo Azure ultrapassa budget do evento | Média | Alto | APIM compartilhado + Budget Alert + script teardown.ps1 ao final |
-| 2 | Atrito de setup External ID em F3 | Alta | Médio | Tenant External ID pré-criado pelo instrutor, fornecido aos alunos via README |
+| 1 | Custo Azure ultrapassa budget do evento | Baixa | Alto | Gateway YARP custo ~US$0 (sem APIM compartilhado — ADE-004) + Budget Alert + script teardown.ps1 ao final |
+| 2 | ~~Atrito de setup External ID em F3~~ — **MITIGADO/FECHADO** (ADE-005) | — | — | Sem tenant External ID nem user flows: usa o tenant Entra workforce que o aluno já tem (App Registration + MSAL/Easy Auth). Atrito eliminado. |
 | 3 | n8n exposto sem auth na free config | Média | Alto | Basic auth obrigatório no PORTAL-GUIDE de S4 |
 | 4 | MCP é tecnologia recente — quebra de spec durante evento | Média | Médio | Pinning de versão do SDK MCP em todas as fases; `@architect` valida no design de S5 |
 | 5 | Drift entre branches (hotfix em F1 após F2 criada) | Baixa | Médio | Congelar `main` pré-workshop; cherry-pick scriptado em bootstrap de cada fase |
-| 6 | Mapping de IDs Entra (GUID) ↔ IDs locais (int) | Alta | Médio | **Decisão arquitetural pendente:** `@architect` decide em S3 design entre (a) tabela mapping, (b) coluna `entra_oid` em users, (c) duplicar registro |
+| 6 | ~~Mapping de IDs Entra (GUID) ↔ IDs locais (int)~~ — **RESOLVIDO/FECHADO** (ADE-005, supersede ADE-001) | — | — | Decisão fechada: o claim `oid` (GUID estável do tenant workforce) é a chave; coluna aditiva idempotente `entra_oid` em `purchases`/`users`. Sem tabela de mapping. |
 | 7 | 40h causam fadiga (formato compacto) | Alta | Médio | Calendário sugerido: 4 finais-de-semana × 10h **OU** 5 dias úteis × 8h — `@pm` define com base na audiência |
 | 8 | Gemini cai durante aula F5 | Baixa | Alto | Fallback Groq + cache local pré-configurado; documentado no SPEAKER-NOTES de S5 |
 | 9 | Cold start de Functions trava demo ao vivo | Média | Baixo | Warmup automático 5min antes de cada bloco hands-on |
@@ -142,21 +146,28 @@ S7 (Materiais didáticos) ─── paralela a S1–S6 (cada fase entrega seus 5
 | 1 | Hospedagem n8n | Azure Container Apps (Consumption) com basic auth |
 | 2 | LLM padrão do chatbot | Gemini 2.0 Flash + MCP para portabilidade |
 | 3 | Quantas fases | 6 (F1-F6) + merge final em main |
-| 4 | Escopo do External ID | Substitui JWT só no fluxo v2; v1 mantém bcrypt+JWT para comparação |
+| 4 | Escopo da identidade v2 | **Re-escopo (ADE-005):** App Registration no tenant workforce + MSAL.js (PKCE) + Easy Auth substitui JWT só no fluxo v2 (sem External ID, sem tenant externo); v1 mantém bcrypt+JWT para comparação |
 | 5 | Tools do MCP | `consultar_disponibilidade`, `verificar_ingresso`, `consultar_bracket` |
 | 6 | Flow Visualizer real-time | SignalR free tier + fallback polling 2s |
-| 7 | Custo + APIM tier | APIM Developer **compartilhado** (1 instância, products/subs por aluno) |
+| 7 | Gateway + custo | **Re-escopo (ADE-004):** sem APIM. Gateway YARP em código (.NET) hospedado em Container App **por aluno** (Consumption, scale-to-zero ~US$0); custo compartilhado do gateway eliminado |
 | 8 | Pré-requisitos do aluno | C# básico + Git + Azure free trial US$200 ativo |
 | 9 | Audiência | Devs polyglot com background cloud (não exige .NET prévio) |
 | 10 | Materiais por fase | 6 artefatos: README + PORTAL-GUIDE + SPEAKER-NOTES + slides + vídeo + branch |
+
+## Decisões resolvidas pós-criação do epic (re-escopo 2026-06-03)
+
+| Decisão | Resolução | Ref |
+|---|---|---|
+| Mapping IDs Entra (GUID) ↔ IDs locais (int) | **RESOLVIDA** — claim `oid` é a chave; coluna aditiva `entra_oid` (sem tabela de mapping) | ADE-005 (supersede ADE-001) |
+| Gateway (APIM Developer vs código) | **RESOLVIDA** — YARP em código (.NET), por aluno, custo ~US$0 | ADE-004 |
+| Identidade (External ID vs tenant workforce) | **RESOLVIDA** — App Registration tenant workforce + MSAL/Easy Auth | ADE-005 |
 
 ## Decisões pendentes (carry-forward para fases específicas)
 
 | Decisão | Quando resolver | Responsável |
 |---|---|---|
-| Mapping IDs Entra (GUID) ↔ IDs locais (int) | S3 (F3) design | `@architect` |
 | Formato de calendário (4 finais-de-semana × 10h OU 5 dias × 8h) | Pré-evento | `@pm` |
-| Custom domain para APIM compartilhado (opcional) | Pré-evento | `@devops` |
+| Custom domain para o gateway (opcional) | Pré-evento | `@devops` |
 | Pinning de versão MCP SDK | S5 (F5) design | `@architect` |
 
 ## Stakeholders
@@ -179,8 +190,8 @@ S7 (Materiais didáticos) ─── paralela a S1–S6 (cada fase entrega seus 5
    - **Validation:** smoke test específico do fluxo v2 daquela fase
 4. **@sm** começa por **S2.1 (F1)** que já está detalhada nos 9 sub-itens no blueprint — é o "molde" para as demais
 5. **@po (Pax)** valida cada story no checklist de 10 pontos antes de virar Ready
-6. **@architect (Aria)** consultado em S2.3 (mapping Entra↔local) e S2.5 (pinning MCP SDK) durante o draft
-7. **@devops (Gage)** orquestra CI/CD por branch e setup compartilhado de APIM/External ID tenant
+6. **@architect (Aria)** consultado em S2.5 (pinning MCP SDK) durante o draft — decisões de gateway (ADE-004) e identidade/mapping (ADE-005) já fechadas
+7. **@devops (Gage)** orquestra CI/CD por branch e deploy do Container App de gateway YARP por aluno (sem setup compartilhado de APIM/External ID — eliminados no re-escopo)
 8. **@dev (Dex)** implementa o código de demonstração de cada fase quando story estiver Ready
 9. **@analyst (Atlas)** colabora em S2.7 (materiais didáticos transversais) em paralelo
 
@@ -190,7 +201,7 @@ S7 (Materiais didáticos) ─── paralela a S1–S6 (cada fase entrega seus 5
 - [ ] App rodando em `main` consolidado com fluxo v2 completo
 - [ ] 6 branches preservadas (`phase-01-…` → `phase-06-…`) para futuros workshops
 - [ ] 36 artefatos didáticos entregues (6 fases × 6 artefatos cada)
-- [ ] Cost report final ≤ US$95 compartilhado + ≤ US$15 por aluno
+- [ ] Cost report final ~US$0 compartilhado (sem APIM/External ID — ADE-004/005) + ≤ US$15 por aluno
 - [ ] Script `teardown.ps1` testado e disponível
 - [ ] Pesquisa NPS pós-evento coletada
 
