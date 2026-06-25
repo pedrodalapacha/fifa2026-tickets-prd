@@ -83,6 +83,38 @@ Os nomes abaixo são **seus** — escolha um prefixo pessoal (ex.: suas iniciais
 
 ---
 
+## Referência rápida — Variáveis & Secrets do GitHub Actions
+
+> 📌 **Tabela única de tudo que o workflow `Lab Oitavas de Final` consome.** Você **configura** esses valores ao longo das Fases 8 (migrations), 10 (function) e 12 (frontend) — esta seção é só o **mapa consolidado** para consulta/conferência. Local: seu fork → **Settings → Secrets and variables → Actions**.
+
+### 🔑 Secrets (aba *Secrets*)
+
+| Secret | Bloco do workflow | De onde vem | Fase do guia |
+|---|---|---|---|
+| `AZURE_CREDENTIALS` | migrations | JSON do Service Principal (`clientId`/`clientSecret`/`subscriptionId`/`tenantId`) | **8.1.D** |
+| `SQL_CONNECTION_STRING` | migrations | connection string do banco (monte no Cloud Shell PowerShell) | **8.2** |
+| `FUNCTION_PUBLISH_PROFILE` | function | publish profile da Function App (Portal *Get publish profile* ou CLI) | **10.1** |
+| `AZURE_FRONTEND_PUBLISH_PROFILE` | frontend | publish profile do Web App do frontend (capture **depois** de ligar o SCM basic-auth) | **12.2** |
+
+### 📋 Variables (aba *Variables*)
+
+| Variable | Bloco | Valor (o SEU) | Default no workflow | Fase |
+|---|---|---|---|---|
+| `SQL_SERVER` | migrations | `<seu-sql-server>` (sem `.database.windows.net`) | `sql-dev-tk-cin-001` | **8.2** |
+| `RESOURCE_GROUP` | migrations | `<seu-rg>` (RG do SQL) | `rg-hml-tik-cin-001` | **8.2** |
+| `FUNCTION_APP_NAME` | function | `<seu-func>` | — | **10.1** |
+| `FUNCTION_V2_URL` | frontend (build) | `https://<seu-func>.azurewebsites.net` (raiz, **sem** `/api`) | — | **10.1 / 12.2** |
+| `FRONTEND_APP_NAME` | frontend | `<seu-frontend>` (Web App do portal) | — | **12.2** |
+| `BACKEND_URL` | frontend (build) | `https://<seu-backend>.azurewebsites.net` (alimenta o proxy do `web.config`) | — | **10.3 / 12.2** |
+
+> 💡 `VITE_API_URL` **não** é uma Variable do fork — é fixo `/api` (relativo), embutido no build. Só o `BACKEND_URL` é parametrizado por aluno (ver a lição em **10.3**).
+
+### ⌨️ Inputs do *Run workflow* (overrides na hora de rodar)
+
+`acao` (**obrigatório** — `tudo` / `migrations` / `function` / `frontend`) + opcionais `sql_server`, `resource_group`, `function_app_name`, `frontend_app_name` (sobrepõem as Variables só naquela execução). **Precedência:** input manual → Variable → default do workflow.
+
+---
+
 ## Fase 1 — Resource Group
 
 1. Portal → busque **"Resource groups"** → **`+ Create`**.
