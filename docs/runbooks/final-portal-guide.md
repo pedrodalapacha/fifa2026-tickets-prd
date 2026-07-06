@@ -138,7 +138,7 @@ O chatbot da Final (F5) usa o **Google Gemini** para decidir qual das 7 tools ch
 
 1. Portal → **Managed Identities → `+ Create`**.
 2. **Subscription/RG** = os seus · **Region** = a do CAE · **Name** = **`id-fifa2026-kv-reader`** `[nome sugerido; o owner/facilitador confirma]` → **Review + create → Create**.
-3. Na **Overview** da MI, anote o **Resource ID** (você vai precisar dele para o backend/Functions na [Fase 9](#fase-9--migração-sem-downtime-backend--functions-das-quartas--key-vault)).
+3. Na **Overview** da MI, anote o **Resource ID** (guardado só para eventuais **fallbacks CLI opcionais** dos Container Apps — ex.: a nota da **Fase 3.3**; no caminho Portal a MI é selecionada **pelo nome**). *(O backend e as Functions da [Fase 9](#fase-9--migração-sem-downtime-backend--functions-das-quartas--key-vault) **não** usam esta UA — eles leem o cofre pela **própria system-assigned**.)*
 
 ### 1.3 — Dar à MI a role de leitura de segredo (escopo = o cofre) **[configurar à mão]**
 
@@ -148,7 +148,7 @@ O chatbot da Final (F5) usa o **Google Gemini** para decidir qual das 7 tools ch
 4. **Escopo** = **este KV** (o próprio recurso — menor escopo possível, não a subscription/RG).
 
 > ⚠️ A atribuição de role **NÃO é instantânea** — a propagação leva **alguns minutos**. **Valide antes** de trocar qualquer App Setting.
-> 💡 **CLI equivalente** (se o principal não aparecer no seletor do Portal): `az role assignment create --role "Key Vault Secrets User" --assignee-object-id <objectId-da-MI> --assignee-principal-type ServicePrincipal --scope <resourceId-do-KV>`.
+> 💡 **CLI equivalente — OPCIONAL** (fallback, **só se** o principal não aparecer no seletor do Portal; o caminho principal acima é 100% Portal): `az role assignment create --role "Key Vault Secrets User" --assignee-object-id <objectId-da-MI> --assignee-principal-type ServicePrincipal --scope <resourceId-do-KV>`.
 
 ### 1.4 — Criar os secrets no cofre (valor **byte-a-byte**)
 
@@ -258,7 +258,7 @@ Depois, em **Application → Containers → `Edit and deploy` → Environment va
 
 → **Save → Create**.
 
-> 💡 **CLI equivalente** (ADE-010 D4a): `az containerapp secret set -n ca-mcp-<sufixo> -g <seu-rg> --secrets "gemini-key=keyvaultref:https://kv-dev-tk-cin-001.vault.azure.net/secrets/gemini-api-key,identityref:<resourceId-da-id-fifa2026-kv-reader>"`. Repita para `sql-conn` e `gateway-secret`. **A beleza:** o env var **continua** `secretref:` — zero churn; o que muda é o **secret do CA**, de valor inline para KV-backed.
+> 💡 **CLI equivalente — OPCIONAL** (ADE-010 D4a; fallback **só se preferir CLI** — o caminho principal acima é 100% Portal): `az containerapp secret set -n ca-mcp-<sufixo> -g <seu-rg> --secrets "gemini-key=keyvaultref:https://kv-dev-tk-cin-001.vault.azure.net/secrets/gemini-api-key,identityref:<resourceId-da-id-fifa2026-kv-reader>"`. Repita para `sql-conn` e `gateway-secret`. **A beleza:** o env var **continua** `secretref:` — zero churn; o que muda é o **secret do CA**, de valor inline para KV-backed.
 
 > ⚠️ **Manual (cofre) × workflow (inline) — escolha UM caminho para os sensíveis do McpServer:** o job `mcp-server` do `lab-a-final.yml` também sabe aplicar `SqlConnectionString`/`GEMINI_API_KEY`/`GATEWAY_SHARED_SECRET` como *secretref* **inline**, a partir dos Secrets do fork ([Fase 10](#fase-10--fork-novo--variablessecrets-consolidados)). Se você **blindou pelo cofre** aqui, **não** deixe o workflow reaplicar esses três (ele sobrescreveria o KV-backed por inline); rode o `mcp-server` uma vez para trocar a **imagem** e **re-aponte** os três para o cofre depois, **[débito residual]** ou mantenha-os só manuais. Para o lab, o caminho **cofre** é o "blindado"; o **inline** é o "simples".
 
@@ -424,22 +424,34 @@ O gateway expõe duas rotas para o front:
 
 ## Fase 9 — Migração sem downtime: backend + Functions das Quartas → Key Vault
 
-O gateway já teve o segredo migrado ([Fase 4.2](#42-migrar-o-gateway__adminsharedsecret-para-o-cofre-in-place-sem-downtime)). Faltam os **outros recursos existentes** que **validam** o `X-Gateway-Key`: o **backend v1** e as **Functions**. Hoje eles guardam o `GATEWAY_SHARED_SECRET` fora do cofre; vamos fechá-lo no KV **in-place, sem derrubar as Quartas** (9.1). E — como a UA `id-fifa2026-kv-reader` e o `keyVaultReferenceIdentity` **já ficam montados** nesses mesmos recursos no passo 9.1 — aproveitamos para fechar **de uma vez** os **outros segredos herdados** que ainda estão em claro: os da **Function F1** (`SqlConnectionString` + `ServiceBusConnection`, 9.2) e a **senha do backend v1** (`DB_PASSWORD`, 9.3). **Sem novo grant nem nova identidade** — só troca o valor de cada App Setting, um por vez. Base: **ADE-010 (Ordem de migração)**.
+Fechar no cofre os segredos ainda em claro nos **recursos existentes** das Quartas — o **backend v1** e as **Functions** (o gateway já foi na [Fase 4.2](#42-migrar-o-gateway__adminsharedsecret-para-o-cofre-in-place-sem-downtime)). Tudo **in-place, um recurso/App Setting por vez, sem derrubar as Quartas**: a **system-assigned de cada recurso** (ligada em 9.1) resolve a Key Vault reference por padrão — só troca o **valor** de cada App Setting. Base: [ADE-010](../architecture/ade-010-managed-identity-keyvault.md) (Ordem de migração).
 
-> ⚠️ **Forma DIFERENTE do Container App:** backend (App Service) e Functions (Function App) **não** usam `secretref`. A Key Vault reference é o **valor do próprio App Setting**:
+O que sai do claro por subfase (o shared secret é o que **valida** o `X-Gateway-Key`):
+
+| Subfase | Recurso | Segredo que vai pro cofre |
+|---|---|---|
+| 9.1 | backend v1 **+** Functions | `GATEWAY_SHARED_SECRET` (o shared secret) |
+| 9.2 | Function F1 | `SqlConnectionString` + `ServiceBusConnection` |
+| 9.3 | backend v1 | `DB_PASSWORD` (a senha do SQL) |
+
+> 🧭 **Aqui a identidade é a *própria* de cada recurso, não a UA compartilhada.** App Service (backend) e Function App **não** deixam escolher no Portal qual identidade resolve a Key Vault reference (`keyVaultReferenceIdentity` só via CLI/ARM) → usa-se a **system-assigned de cada recurso**, o resolvedor padrão ([doc MS](https://learn.microsoft.com/azure/app-service/app-service-key-vault-references): *"references use the app's system-assigned identity by default"*). **Trade-off:** +2 role assignments (backend e Functions ganham `Key Vault Secrets User`) e 2 exceções à narrativa "só a UA lê o cofre" — em troca de **zero terminal**.
+
+> ⚠️ **Forma diferente do Container App:** backend e Functions **não** usam `secretref`. A Key Vault reference é o **próprio valor** do App Setting:
 > `GATEWAY_SHARED_SECRET = @Microsoft.KeyVault(SecretUri=https://kv-dev-tk-cin-001.vault.azure.net/secrets/gateway-admin-shared-secret/)`
 
 ### 9.1 Ordem in-place, **um recurso por vez** (repetir p/ backend e p/ Functions) **[configurar à mão]**
 
-1. **Anexar** a UA compartilhada: recurso → **Identity → User assigned → `+ Add`** → `id-fifa2026-kv-reader`.
-2. **Apontar a identidade que resolve a reference (landmine P-3):** por padrão a reference tenta a **system-assigned**. Para usar a UA compartilhada, **setar `keyVaultReferenceIdentity`** = Resource ID da `id-fifa2026-kv-reader`. O Portal **não** expõe isso na tela de Configuration → use a CLI:
-   - Backend (Web App): `az webapp update -n <seu-backend> -g <seu-rg> --set keyVaultReferenceIdentity=<resourceId-da-UA-MI>`
-   - Functions: `az functionapp update -n <suas-functions> -g <seu-rg> --set keyVaultReferenceIdentity=<resourceId-da-UA-MI>`
-3. **Trocar o valor do App Setting** `GATEWAY_SHARED_SECRET` para `@Microsoft.KeyVault(SecretUri=.../gateway-admin-shared-secret/)` (dispara **restart** do app — segundos).
-4. **GATE de validação (não avance sem ✅):** Portal → **Configuration** → o setting mostra **"Key Vault Reference"** com status **Resolved** (verde) + smoke retro-compat das Quartas: **login CIAM + compra v2** funcionam; `POST` sem token → **401**.
-5. Só então repita para o **próximo** recurso. **Sem big-bang** — um de cada vez.
+**Repita o bloco para o backend v1 e depois para as Functions — um de cada vez, sem big-bang.**
 
-> ⚠️ **Esquecer o `keyVaultReferenceIdentity`** = a reference tenta a system-assigned (talvez ausente) → **não resolve** → o App Setting entrega a **string literal** `@Microsoft.KeyVault(...)` ao app → quebra. É por isso que o **status `Resolved` é o gate**.
+1. Recurso → **Settings → Identity → System assigned** → **Status = On** → **Save**.
+2. Key Vault `kv-dev-tk-cin-001` → **Access control (IAM) → `+ Add` → Add role assignment**.
+3. **Role** = `Key Vault Secrets User` (mesma da [Fase 1.3](#13--dar-à-mi-a-role-de-leitura-de-segredo-escopo--o-cofre-configurar-à-mão)) → **Next**.
+4. **Assign access to** = Managed identity → **`+ Select members`** → selecione a **system-assigned do próprio recurso** (backend **ou** Functions) → **Review + assign**.
+5. Recurso → **Configuration** → App Setting `GATEWAY_SHARED_SECRET` → troque o valor para `@Microsoft.KeyVault(SecretUri=https://kv-dev-tk-cin-001.vault.azure.net/secrets/gateway-admin-shared-secret/)` → **Save** (restart de segundos).
+
+> ⚠️ A role leva **alguns minutos** pra propagar — só faça o passo 5 depois. A reference resolve pela system-assigned **por padrão**: nada a apontar, **zero terminal** — mas a identidade **precisa existir e ter a role**.
+
+> ✅ **GATE por recurso (não avance sem):** **Configuration** → `GATEWAY_SHARED_SECRET` mostra **Key Vault Reference · Resolved** (verde) · smoke Quartas: login CIAM + compra v2 OK · `POST` sem token → **401**. Se aparecer a **string literal** `@Microsoft.KeyVault(...)`, a reference não resolveu (system-assigned desligada ou sem role). Só então passe ao próximo recurso.
 
 > ⭐ **Agora a igualdade é estrutural:** gateway, backend, Functions **e** McpServer referenciam **o mesmo** secret `gateway-admin-shared-secret`. Não dá mais para um lado divergir do outro por engano.
 
@@ -447,7 +459,7 @@ O gateway já teve o segredo migrado ([Fase 4.2](#42-migrar-o-gateway__adminshar
 
 ### 9.2 Os outros segredos da Function F1 **[configurar à mão]**
 
-O `GATEWAY_SHARED_SECRET` da Function já foi para o cofre (9.1) — mas a **Function F1** (herdada das **Oitavas**) ainda guarda **em claro** outros dois segredos: a **connection string do SQL** (`SqlConnectionString`, com a senha) e a **connection string do Service Bus** (`ServiceBusConnection`, uma SAS key). Feche os dois **in-place**, com a **mesma** forma da 9.1 — a UA `id-fifa2026-kv-reader` **já está anexada** e o `keyVaultReferenceIdentity` **já foi setado** nesta Function (passo 9.1), então **não há novo grant nem nova identidade**: só troca o **valor** de cada App Setting, **um por vez**, por uma Key Vault reference (valor byte-idêntico ao atual).
+A **Function F1** (herdada das Oitavas) ainda guarda em claro **dois** segredos: `SqlConnectionString` (com a senha) e `ServiceBusConnection` (uma SAS key). Feche os dois **in-place**, com a **mesma** forma da 9.1 — a system-assigned desta Function **já está ligada e com a role** (passo 9.1), então **sem novo grant**: só troca o **valor** de cada App Setting, um por vez, por uma Key Vault reference (valor byte-idêntico ao atual).
 
 | App Setting da Function | Trocar o valor para | Origem no cofre (Fase 1.4) |
 |---|---|---|
@@ -460,16 +472,16 @@ O `GATEWAY_SHARED_SECRET` da Function já foi para o cofre (9.1) — mas a **Fun
 >
 > 🏁 **Fecho da subfase (só depois do segundo):** com **os dois** migrados, confirme que `SqlConnectionString` **e** `ServiceBusConnection` mostram **Resolved** ao mesmo tempo e o smoke das Oitavas segue verde — só então a Function F1 está 100% no cofre.
 
-> **[débito residual]** O `AzureWebJobsStorage` da Function F1 (a **account key** da Storage, em claro) **fica de fora** desta migração **de propósito**: a resolução de KV reference nesse setting específico tem **ressalvas de bootstrap do host** (depende do plano/scale controller das Functions), então uma migração cega pode **impedir a Function de subir**. O caminho certo é a **identity-based connection** (`AzureWebJobsStorage__accountName` + RBAC de Storage na identidade), **fora do escopo desta aula**. Fica como **débito explícito e honesto** — a **única** exceção nomeada ao "zero em claro" do lado das Functions.
+> **[débito residual]** O `AzureWebJobsStorage` da Function (a **account key** da Storage, em claro) **fica de fora de propósito**: migrar KV reference nesse setting tem ressalvas de **bootstrap do host** (scale controller) e pode **impedir a Function de subir**. O caminho certo é **identity-based connection** (`AzureWebJobsStorage__accountName` + RBAC de Storage), **fora do escopo**. É a única exceção nomeada ao "zero em claro" das Functions.
 
 ### 9.3 A senha do backend v1 **[configurar à mão]**
 
-O backend v1 (Node/App Service) é o **outro** recurso que ainda tem senha em claro — o `database.js` lê `DB_PASSWORD` como **campo discreto** (não uma connection string inteira, ver [nota da Fase 1.4](#14--criar-os-secrets-no-cofre-valor-byte-a-byte)). Feche-o **in-place**, reusando o que a 9.1 já montou **neste mesmo backend** (a UA `id-fifa2026-kv-reader` **anexada** e o `keyVaultReferenceIdentity` **setado** — **sem novo grant**):
+O backend v1 (Node/App Service) ainda tem a senha em claro — o `database.js` lê `DB_PASSWORD` como **campo discreto** (não uma connection string inteira, ver [nota da Fase 1.4](#14--criar-os-secrets-no-cofre-valor-byte-a-byte)). Feche-o **in-place**, reusando o que a 9.1 montou neste mesmo backend (system-assigned ligada e com a role — **sem novo grant**).
 
-> ⚠️ **Antes de migrar, confirme que não há Connection String no backend:** na aba **Configuration** do backend, verifique que **NÃO** existe uma **Connection String** `DefaultConnection` (ou o App Setting `DB_CONNECTION_STRING`). O `database.js` dá **prioridade** a essas connection strings sobre os campos `DB_*` (linhas 7–13: `connectionString || {...}`), então, se alguma estiver configurada, migrar o `DB_PASSWORD` seria um **no-op silencioso** — a senha continuaria viva **dentro da connection string**, ainda em claro. Se existir, é **ela** (a Connection String `DefaultConnection` / `DB_CONNECTION_STRING`) que deve ser migrada para o cofre / removida — não o `DB_PASSWORD`.
+> ⚠️ **Antes de migrar, confirme que NÃO há Connection String no backend.** Em **Configuration**, veja que não existe a **Connection String** `DefaultConnection` nem o App Setting `DB_CONNECTION_STRING`. O `database.js` **prioriza** connection string sobre os campos `DB_*` (linhas 7–13: `connectionString || {...}`) — se houver uma, migrar `DB_PASSWORD` é **no-op silencioso** (a senha segue viva dentro da connection string, em claro). Se existir, migre/remova **ela**, não o `DB_PASSWORD`.
 
-1. **Trocar o valor** do App Setting `DB_PASSWORD` para `@Microsoft.KeyVault(SecretUri=https://kv-dev-tk-cin-001.vault.azure.net/secrets/backend-sql-password/)` (o secret criado na [Fase 1.4](#14--criar-os-secrets-no-cofre-valor-byte-a-byte) com a senha atual, byte-a-byte). Dispara **restart** (segundos).
-2. **Deixe como estão** os App Settings **não-sensíveis** `DB_SERVER` / `DB_PORT` / `DB_USER` / `DB_NAME` — não há segredo neles; **só a senha** vai para o cofre.
+1. `DB_PASSWORD` → troque o valor para `@Microsoft.KeyVault(SecretUri=https://kv-dev-tk-cin-001.vault.azure.net/secrets/backend-sql-password/)` (secret da [Fase 1.4](#14--criar-os-secrets-no-cofre-valor-byte-a-byte), senha atual byte-a-byte) → **Save** (restart de segundos).
+2. **Deixe como estão** `DB_SERVER` / `DB_PORT` / `DB_USER` / `DB_NAME` — não há segredo neles; **só a senha** vai pro cofre.
 
 > ✅ **GATE (não avance sem ✅):** Portal → backend → **Configuration** → `DB_PASSWORD` mostra **"Key Vault Reference"** com status **Resolved** (verde) + **smoke das Quartas**: o **login admin workforce** funciona e uma rota `/admin/*` responde (o backend conecta no SQL com a senha resolvida do cofre). Se falhar, **reverta** o `DB_PASSWORD` ao valor **em claro byte-idêntico** — blast radius = **um** recurso.
 
@@ -479,7 +491,7 @@ O backend v1 (Node/App Service) é o **outro** recurso que ainda tem senha em cl
 |---|---|---|
 | **P-1** | valor divergente do shared secret → **401 em toda request** | **um** secret referenciado por todos; valor **byte-idêntico** na migração |
 | **P-2** | typo em `sql-connection-string` / `servicebus-connection-string` / `backend-sql-password` → 500 nas rotas de compra/consulta (ou trigger do Service Bus que não liga) | copiar exato; validar McpServer/Functions/backend **antes** de seguir; **um App Setting por vez** |
-| **P-3** | `keyVaultReferenceIdentity` esquecido → reference não resolve → string literal | setar **antes**; exigir status **Resolved** |
+| **P-3** | **system-assigned não ligada** ou **sem a role `Key Vault Secrets User`** no cofre → reference não resolve → string literal | ligar **System assigned = On** + atribuir a role à identidade **antes**; exigir status **Resolved** |
 | **P-4** | trocar o secret KV-backed do Container App **antes** de anexar a MI → ARM rejeita | anexar MI **primeiro** (Fases 3.2 / 4.2 / 7.2) |
 | **P-5** | **rotação** do shared secret **não é atômica** entre apps → janela de 401 | rotação = **manutenção planejada** (restart coordenado dos dois lados), nunca casual |
 | **P-6** | **rede do KV** — se `kv-dev-tk-cin-001` tiver firewall/`publicNetworkAccess: Disabled`, os apps não enxergam o cofre | `[confirmar no Portal]` o networking do KV **antes**; provavelmente público+RBAC (default) |
@@ -488,7 +500,13 @@ O backend v1 (Node/App Service) é o **outro** recurso que ainda tem senha em cl
 
 > **[débito residual]** Com a [Fase 9.3](#93-a-senha-do-backend-v1-configurar-à-mão) a senha do backend v1 **já saiu do claro** (virou o secret `backend-sql-password` no cofre). O que **resta** como débito é **eliminar a senha de vez**: o backend ainda usa **SQL auth** (o `database.js` lê `DB_PASSWORD`, **não** foi convertido para MI). **Tirar a senha do claro (feito) ≠ eliminá-la** — isso é o SQL-MI, o "próximo nível" do [Apêndice E](#apêndice-e--sql-via-managed-identity-showcaseopcional). Sair do plaintext já é o ganho maior; eliminar a senha é showcase.
 
-✅ **Checkpoint:** backend e Functions com `GATEWAY_SHARED_SECRET` resolvendo do **cofre** (status **Resolved**); a **Function F1** com `SqlConnectionString` + `ServiceBusConnection` também do cofre (9.2); o **backend v1** com `DB_PASSWORD` do cofre (9.3); cada recurso validado com o smoke das Quartas/Oitavas; **zero valor em claro remanescente na config** — as **únicas** exceções nomeadas são o `AzureWebJobsStorage` da Function (débito de bootstrap, 9.2) e a **senha do SQL que ainda existe** (agora **no cofre**, não em claro) até o SQL-MI ([Apêndice E](#apêndice-e--sql-via-managed-identity-showcaseopcional)); os 4 lados (gateway/backend/Functions/McpServer) apontando para o **mesmo** `gateway-admin-shared-secret`.
+✅ **Checkpoint:**
+- backend **e** Functions com `GATEWAY_SHARED_SECRET` → **Resolved** (cofre).
+- Function F1: `SqlConnectionString` + `ServiceBusConnection` → **Resolved** (9.2).
+- backend v1: `DB_PASSWORD` → **Resolved** (9.3).
+- cada recurso validado com o smoke Quartas/Oitavas.
+- **zero valor em claro** na config — exceções nomeadas: `AzureWebJobsStorage` da Function (débito de bootstrap, 9.2) e a senha do SQL (agora **no cofre**, não em claro) até o SQL-MI ([Apêndice E](#apêndice-e--sql-via-managed-identity-showcaseopcional)).
+- os 4 lados (gateway/backend/Functions/McpServer) no **mesmo** `gateway-admin-shared-secret` — gateway/McpServer via **UA compartilhada**, backend/Functions via **system-assigned própria**. **Zero terminal**.
 
 ---
 
@@ -496,7 +514,18 @@ O backend v1 (Node/App Service) é o **outro** recurso que ainda tem senha em cl
 
 Toda a infra e o cofre acima foram criados **à mão**. Agora vem a parte do fork. No **seu fork** → **Settings → Secrets and variables → Actions**. Os **nomes** são **fixos** (iguais para todos); os **valores** são os **seus** (placeholders da convenção).
 
-### Variables
+### O que você preenche (caminho cofre — o desta aula)
+
+No caminho cofre (o das aulas) você preenche só **2 Secrets** + as **Variables**. Os segredos sensíveis já estão no Key Vault (Fases 3/4/7) — **não vão no fork**.
+
+**Secrets (só 2):**
+
+| Nome EXATO | Conteúdo | Usada em (ação) |
+|---|---|---|
+| `AZURE_CREDENTIALS` | JSON do Service Principal com acesso ao RG | mcp-server · gateway · flow-events |
+| `AZURE_FRONTEND_PUBLISH_PROFILE` | publish profile do `<seu-frontend>` (**SCM Basic Auth On** *antes* de capturar) | frontend |
+
+**Variables (as 13 da Final):**
 
 | Nome EXATO | Valor (seu) | Usada em (ação) |
 |---|---|---|
@@ -514,31 +543,21 @@ Toda a infra e o cofre acima foram criados **à mão**. Agora vem a parte do for
 | `VITE_GEMINI_MODEL` *(opcional)* | `gemini-2.5-flash` | frontend (override; default do código já é `gemini-2.5-flash`) |
 | `VITE_FLOW_EVENTS_BASE_URL` | `https://<gateway-fqdn>/flow-events` | frontend (rota `/flow`) |
 
-> 🔁 **Aliases (não duplique):** `VITE_GATEWAY_V2_URL` e `GATEWAY_V2_URL` são o **mesmo valor** — o workflow lê `vars.VITE_GATEWAY_V2_URL || vars.GATEWAY_V2_URL`. Basta setar **uma** das duas. O mesmo vale para `VITE_FUNCTION_V2_URL`/`FUNCTION_V2_URL` (ver a nota de pré-requisito das Variables herdadas das Quartas, abaixo).
+> 🔁 **Aliases (não duplique):** `VITE_GATEWAY_V2_URL` e `GATEWAY_V2_URL` são o **mesmo valor** — o workflow lê `vars.VITE_GATEWAY_V2_URL || vars.GATEWAY_V2_URL`. Basta setar **uma** das duas. O mesmo vale para `VITE_FUNCTION_V2_URL`/`FUNCTION_V2_URL` (ver a nota das Variables herdadas, abaixo).
 
 > 📌 **Modelo real:** o runtime do `gemini.ts` usa **`gemini-2.5-flash`** (o comentário de cabeçalho do arquivo ainda cita `2.0-flash` — inconsistência conhecida e inofensiva; ver [Apêndice B](#apêndice-b--modelo-gemini-real-vs-comentário)). Não precisa mexer no código.
 
-### Secrets
-
-| Nome EXATO | Conteúdo | Usada em (ação) |
-|---|---|---|
-| `AZURE_CREDENTIALS` | JSON do Service Principal com acesso ao RG | mcp-server · gateway · flow-events |
-| `PHASE05_SQL_CONNECTION_STRING` | connection string ADO.NET do `FIFA2026Tickets` | mcp-server *(ver nota do cofre)* |
-| `GEMINI_API_KEY` | sua chave Gemini | mcp-server *(ver nota do cofre)* |
-| `GROQ_API_KEY` / `MISTRAL_API_KEY` *(opcionais)* | chaves de fallback | mcp-server |
-| `GATEWAY_SHARED_SECRET` | **mesmo** valor do `gateway-admin-shared-secret` | mcp-server *(ver nota do cofre)* |
-| `PHASE06_SIGNALR_CONNECTION_STRING` | connection string do Azure SignalR | flow-events *(ver nota do cofre)* |
-| `AZURE_FRONTEND_PUBLISH_PROFILE` | publish profile do `<seu-frontend>` (SCM Basic Auth On **antes** de capturar) | frontend |
-
-> ⚠️ **Cofre × workflow (leia com atenção — evita build vermelho):** se você **blindou os sensíveis pelo Key Vault** (Fases 3/4/7), o job que os aplica *inline* **sobrescreveria** o KV-backed. **Mas dois Secrets do fork são OBRIGATÓRIOS mesmo no caminho cofre** — o job aborta (`exit 1`) se estiverem vazios:
-> - **`PHASE05_SQL_CONNECTION_STRING`** (job `mcp-server`) e **`PHASE06_SIGNALR_CONNECTION_STRING`** (job `flow-events`) → **EXCEÇÃO: mantenha SEMPRE populados**. Deixá-los vazios = **build vermelho** em `acao=mcp-server`/`flow-events`. Caminho cofre: mantenha o Secret preenchido, **rode o `acao`**, e **depois re-aponte** o secret do Container App (`sql-conn` / `azure-signalr-conn`) para a **Key Vault reference** (como nas Fases 3.3 / 7.4 / 11.2).
-> - **`GEMINI_API_KEY`** e **`GATEWAY_SHARED_SECRET`** (job `mcp-server`) → **condicionais** (o job só os aplica se presentes; ausência = **aviso**, não erro). Caminho cofre: pode deixá-los **vazios/ausentes** no fork e manter os secrets `gemini-key`/`gateway-secret` como Key Vault reference (o job só troca a **imagem**). Caminho inline: preencha-os.
+> ⚠️ **+ 8 Variables herdadas das Quartas (recrie no fork NOVO).** A Final acrescenta chatbot + rota `/flow` ao **mesmo** bundle das Quartas (não recria o front); Variables **não migram entre forks** ([Fase 11](#fase-11--pr-do-lab--rodar-os-acao-na-ordem) manda criar um fork novo). Copie do seu fork das Quartas as Variables que o job `frontend` injeta **além da tabela acima**:
+> - **login CIAM + admin:** `VITE_CIAM_AUTHORITY` · `VITE_CIAM_CLIENT_ID` · `VITE_ADMIN_TENANT_ID` · `VITE_ADMIN_CLIENT_ID` · `VITE_ADMIN_SCOPE`
+> - **gateway/backend/compra v2:** `GATEWAY_V2_URL` · `BACKEND_URL` · `FUNCTION_V2_URL`
 >
-> Os Secrets do fork continuam **necessários** para o que **não** é KV-backed. Marque sua escolha por segredo. **[débito residual]** consolidar cofre × inline num único caminho é trabalho futuro.
+> **Se não recriar, o build passa verde mas publica um bundle com login CIAM e compra v2 mortos.** (O workflow aceita o nome das Quartas ou o prefixado: `GATEWAY_V2_URL` **ou** `VITE_GATEWAY_V2_URL`; `FUNCTION_V2_URL` **ou** `VITE_FUNCTION_V2_URL`.)
 
-> ⚠️ **Pré-requisito — recrie as Variables/Secrets das Quartas NESTE fork novo (o build do frontend reusa o MESMO Web App).** A Final **acrescenta** o chatbot e a rota `/flow` ao mesmo bundle das Quartas — ela **não** recria o front. Como a [Fase 11](#fase-11--pr-do-lab--rodar-os-acao-na-ordem) manda **criar um fork NOVO** e as Variables/Secrets **não migram entre forks**, você precisa **criar também neste fork novo** — copiando os valores do seu fork das Quartas — as seguintes Variables que o job `frontend` injeta além das listadas acima: `VITE_CIAM_AUTHORITY`, `VITE_CIAM_CLIENT_ID`, `VITE_ADMIN_TENANT_ID`, `VITE_ADMIN_CLIENT_ID`, `VITE_ADMIN_SCOPE` (login CIAM + admin workforce), `GATEWAY_V2_URL`, `BACKEND_URL`, `FUNCTION_V2_URL` (gateway/backend/compra v2). **Se você não recriá-las aqui, o build passa verde mas publica um bundle com login CIAM e compra v2 mortos.** (O workflow aceita tanto o nome das Quartas quanto o prefixado da Final, ex.: `GATEWAY_V2_URL` **ou** `VITE_GATEWAY_V2_URL`; `FUNCTION_V2_URL` **ou** `VITE_FUNCTION_V2_URL`.)
+**Blindou pelo cofre nas Fases 3/4/7? Não preencha nenhum segredo sensível** — o deploy detecta o secret no Container App e preserva a Key Vault reference. Os sensíveis (e as chaves de fallback) só entram no fork no **caminho inline**:
 
-✅ **Checkpoint:** as 13 Variables da Final + as 8 Variables herdadas das Quartas e os Secrets criados no fork, com os nomes EXATOS acima, e sua escolha **cofre × inline** marcada por segredo. *(O job `frontend` tem um fail-fast que aborta se `VITE_CIAM_CLIENT_ID` ou `VITE_FUNCTION_V2_URL` estiverem vazios.)*
+> 🔀 **Não blindou pelo cofre?** O caminho inline (preencher os segredos sensíveis no fork) está no [Apêndice F](#apêndice-f--caminho-inline-só-para-quem-não-blindou-pelo-cofre).
+
+✅ **Checkpoint (caminho cofre):** **2 Secrets** (`AZURE_CREDENTIALS` + `AZURE_FRONTEND_PUBLISH_PROFILE`) + as **13 Variables** da Final + as **8 Variables herdadas** das Quartas, com os nomes EXATOS acima; **nenhum segredo sensível no fork** (blindados no cofre — o deploy detecta o secret existente e **preserva** a Key Vault reference). *(Caminho inline: preencha também os sensíveis do [Apêndice F](#apêndice-f--caminho-inline-só-para-quem-não-blindou-pelo-cofre). O job `frontend` tem fail-fast que aborta se `VITE_CIAM_CLIENT_ID` ou `VITE_FUNCTION_V2_URL` estiverem vazios.)*
 
 ---
 
@@ -559,11 +578,11 @@ A branch do lab no repositório do evento (org **TFTEC**) chama-se **`lab-a-fina
 
 Sempre em **Actions → "Lab A Final" → Run workflow → branch `main`** (já com o workflow após o merge da 11.1), variando o `acao`. A ordem (a mesma do `tudo`) é **`mcp-server` → `gateway` → `flow-events` → `frontend`**:
 
-1. **`acao = mcp-server`** — `dotnet build/test` do McpServer, build & push da imagem no ACR (`cr<sufixo>.azurecr.io/mcp-server:<sha>`), `az containerapp update --image` (troca o placeholder) e — se você optou pelo caminho **inline** — aplica os App Settings sensíveis como secrets. Se você **blindou pelo cofre** (Fase 3), confirme depois que os secrets `sql-conn`/`gemini-key`/`gateway-secret` continuam **Key Vault reference**.
+1. **`acao = mcp-server`** — `dotnet build/test` do McpServer, build & push da imagem no ACR (`cr<sufixo>.azurecr.io/mcp-server:<sha>`), `az containerapp update --image` (troca o placeholder) e — se você optou pelo caminho **inline** — aplica os App Settings sensíveis como secrets. Se você **blindou pelo cofre** (Fase 3), deixe `PHASE05_SQL_CONNECTION_STRING` vazio e confirme que os secrets `sql-conn`/`gemini-key`/`gateway-secret` continuam **Key Vault reference** — agora **garantido pelo workflow**: com o secret do fork vazio, o deploy detecta o `sql-conn` existente e **não sobrescreve** a blindagem.
    > **O que esperar no log:** como o ingress do McpServer é **interno** (sem endereço público), o workflow **não** faz `curl /health` — ele confirma via `az` que a revisão ativa provisionou. O smoke funcional (`tools/list` = 7 via gateway) é o passo manual da [Fase 12](#fase-12--smokes-e-validação-o-coração-do-lab).
 2. **`acao = gateway`** — **rebuild do gateway** a partir de `lab-a-final` para pegar o hardening (`X-Gateway-Key` no cluster `mcp-server` + leitura de `FlowEventsUrl`). Troca a imagem; suas App Settings (incluindo a Key Vault reference da Fase 4) permanecem.
    > **O que esperar no log:** step **"[gateway] Smoke test"** → `POST /purchase` sem token = **401** (fail-closed) + `GET /health` = **200**.
-3. **`acao = flow-events`** — `dotnet build/test` do FlowEvents, build & push da imagem (`cr<sufixo>.azurecr.io/flow-events:<sha>`), `az containerapp update --image` + (se inline) aplica `AzureSignalRConnectionString`, `LogAnalyticsWorkspaceId`, `FrontendOrigin`.
+3. **`acao = flow-events`** — `dotnet build/test` do FlowEvents, build & push da imagem (`cr<sufixo>.azurecr.io/flow-events:<sha>`), `az containerapp update --image` + aplica `AzureSignalRConnectionString`, `LogAnalyticsWorkspaceId`, `FrontendOrigin`. Se você **blindou pelo cofre** (Fase 7), deixe `PHASE06_SIGNALR_CONNECTION_STRING` vazio: o deploy detecta o secret `azure-signalr-conn` existente e **não sobrescreve** a Key Vault reference (o env var `AzureSignalRConnectionString` continua apontando pra ela).
    > **O que esperar no log:** step **"[flow-events] Smoke test"** → `GET /health` com `.status == "healthy"` (ingress externo, então há `curl` público).
 4. **`acao = frontend`** — `npm ci` + `npm run lint` + `vite build` (chatbot **e** rota `/flow` embutidos, com todas as `VITE_*`) + deploy no Web App.
    > **O que esperar no log:** step **"[frontend] Guard"** → `Guard OK — nenhuma key de LLM no bundle`. Se alguma key de LLM aparecer no bundle, o job **falha** de propósito (a key deve ficar só no proxy server-side).
@@ -580,6 +599,34 @@ Com tudo no ar, prove que o lab funciona — e viva o momento didático central 
 
 ### 12.1 Smoke do McpServer (tools/list = 7)
 
+**Caminho principal (navegador — DevTools do portal, sem terminal):** o McpServer tem ingress **interno**, então a única porta pública é o **gateway** (`/mcp`) — a mesma que o chatbot da [Fase 12.2](#122-chatbot-3-perguntas-em-linguagem-natural) usa. Faça a chamada `tools/list` de dentro do próprio portal:
+
+1. Abra o **portal já logado** (login CIAM feito) e abra o **DevTools → aba Console** (F12).
+2. Pegue um **Bearer CIAM válido**: DevTools → aba **Network** → clique em qualquer request autenticada do portal → copie o valor do header **`Authorization`** (sem o prefixo `Bearer `).
+3. No **Console**, cole o snippet (troque `<gateway-fqdn>` e `<access-token-CIAM>`). Rode-o **no próprio tab do portal** — mesma origem que o chatbot já usa:
+
+```js
+const GW = "<gateway-fqdn>";
+const TOKEN = "<access-token-CIAM>";                 // Bearer copiado do header Authorization
+const r = await fetch(`https://${GW}/mcp`, {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${TOKEN}`,
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream"
+  },
+  body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+});
+console.log("status:", r.status, "| X-Cache:", r.headers.get("x-cache"));  // 200 e X-Cache != HIT
+console.log(await r.text());   // leia: result.tools[] com EXATAMENTE 7 tools, todas readOnly
+```
+
+**Espere:** `status 200`, **7 tools** em `result.tools[]` (todas `readOnly`), e **nenhum** `X-Cache: HIT` (POST `/mcp` não é cacheado). *(Se o navegador bloquear por CORS, use a alternativa por terminal abaixo.)*
+
+> 💡 **Mais leve ainda (só olhos):** abra o **chatbot** (12.2) e, na aba **Network** do DevTools, filtre por `mcp` — a chamada `tools/list` que o próprio chatbot faz aparece ali; abra a resposta e confirme as **7 tools**.
+
+<details><summary><strong>Alternativa por terminal (opcional — mesmo request via <code>curl</code>)</strong></summary>
+
 ```bash
 GW="<gateway-fqdn>"
 TOKEN="<access-token-CIAM>"   # cole um Bearer CIAM válido (login no front → DevTools)
@@ -593,6 +640,8 @@ curl -s -X POST "https://${GW}/mcp" \
   -i | tee mcp-tools.txt
 # Espere: 7 tools em result.tools[]; NENHUM cabeçalho X-Cache: HIT (POST /mcp não é cacheado)
 ```
+
+</details>
 
 As **7 tools** que devem aparecer (todas read-only):
 
@@ -672,7 +721,7 @@ A **mesma** telemetria que acende os 5 nós também dá **observabilidade de pro
 ### 13.1 Ligar a telemetria (App Insights via Key Vault) **[configurar à mão]**
 
 1. No Key Vault, crie o secret **`appinsights-connection-string`** com a **Connection String** do App Insights `appi-dev-tk-cin-001` (Overview do recurso). *(O pendente da [Fase 1.4](#14--criar-os-secrets-no-cofre-valor-byte-a-byte).)*
-2. Em **cada** serviço (gateway, McpServer, FlowEvents, Functions), adicione o App Setting `APPLICATIONINSIGHTS_CONNECTION_STRING` como **Key Vault reference** (`appinsights-conn` → o secret acima). *(Container Apps: `secretref`; App Service/Functions: `@Microsoft.KeyVault(...)` + `keyVaultReferenceIdentity`, igual à [Fase 9](#fase-9--migração-sem-downtime-backend--functions-das-quartas--key-vault).)* ⚠️ **Na Function, se você já habilitou o App Insights pelo Portal**, o `APPLICATIONINSIGHTS_CONNECTION_STRING` **já existe em claro** — **SUBSTITUA** o valor existente pela Key Vault reference (troca **in-place**, exigindo o status **Resolved**), **não** crie um App Setting duplicado.
+2. Em **cada** serviço (gateway, McpServer, FlowEvents, Functions), adicione o App Setting `APPLICATIONINSIGHTS_CONNECTION_STRING` como **Key Vault reference** (`appinsights-conn` → o secret acima). *(Container Apps: `secretref` com a **UA compartilhada** — escolhida na tela de Secrets; Functions: `@Microsoft.KeyVault(...)` resolvido pela **system-assigned** já habilitada e com role no cofre na [Fase 9](#fase-9--migração-sem-downtime-backend--functions-das-quartas--key-vault) — **sem** `keyVaultReferenceIdentity`, **sem terminal**.)* ⚠️ **Na Function, se você já habilitou o App Insights pelo Portal**, o `APPLICATIONINSIGHTS_CONNECTION_STRING` **já existe em claro** — **SUBSTITUA** o valor existente pela Key Vault reference (troca **in-place**, exigindo o status **Resolved**), **não** crie um App Setting duplicado.
 
 ### 13.2 Ver o tracing ponta-a-ponta por `correlationId` **[usar]**
 
@@ -736,7 +785,7 @@ Feche a aula com o **quiz** (Google Forms — link fornecido pelo facilitador na
 
 | Camada | Recursos / artefatos |
 |---|---|
-| **Blindar — cofre** | User-Assigned MI `id-fifa2026-kv-reader` + secrets no Key Vault `kv-dev-tk-cin-001` (SQL ADO.NET, senha do backend, Service Bus, Gemini, SignalR, `gateway-admin-shared-secret`) + migração in-place (gateway/backend/Functions: `Gateway__AdminSharedSecret`/`GATEWAY_SHARED_SECRET`, `SqlConnectionString`, `ServiceBusConnection`, `DB_PASSWORD`) sem downtime |
+| **Blindar — cofre** | secrets no Key Vault `kv-dev-tk-cin-001` (SQL ADO.NET, senha do backend, Service Bus, Gemini, SignalR, `gateway-admin-shared-secret`) lidos por Managed Identity — **UA compartilhada `id-fifa2026-kv-reader`** nos Container Apps e **system-assigned de cada recurso** no backend/Functions — + migração in-place (gateway/backend/Functions: `Gateway__AdminSharedSecret`/`GATEWAY_SHARED_SECRET`, `SqlConnectionString`, `ServiceBusConnection`, `DB_PASSWORD`) sem downtime |
 | F5 — Voz | Container App **McpServer** (ingress interno, 7 tools read-only) + chatbot Gemini (chave no cofre, proxy server-side) |
 | F5 — Gateway | App Settings `McpServerUrl` + `Gateway__AdminSharedSecret` (Key Vault reference; X-Gateway-Key no cluster `mcp-server`) |
 | F6 — Visão | Container App **FlowEvents** + **Azure SignalR** (Free/Default) + **Managed Identity** (Log Analytics Reader + leitura do KV) |
@@ -764,7 +813,7 @@ Feche a aula com o **quiz** (Google Forms — link fornecido pelo facilitador na
 | **401** no `POST /mcp` mesmo com Bearer válido | `Gateway__AdminSharedSecret` ≠ `GATEWAY_SHARED_SECRET`, ou gateway não rebuildado | como os dois agora referenciam o **mesmo** secret do cofre (`gateway-admin-shared-secret`), confirme que **ambas as revisões** (gateway e McpServer) subiram **Healthy** e rode `acao=gateway` |
 | **502** em `/mcp` | `McpServerUrl` ausente/errado no gateway, ou target port do McpServer ≠ 8080 | `McpServerUrl = https://<mcp-fqdn>` (Fase 4); ingress target port = **8080** |
 | McpServer responde por **URL pública** | ingress criado como **External** (deveria ser interno) | recriar/ajustar ingress = **Limited to Container Apps Environment** (Fase 2.1) |
-| App Setting mostra a **string literal** `@Microsoft.KeyVault(...)` | reference não resolveu (backend/Functions sem `keyVaultReferenceIdentity`, ou MI sem role) | setar `keyVaultReferenceIdentity` (Fase 9.1) + `Key Vault Secrets User` na MI (Fase 1.3); exigir status **Resolved** |
+| App Setting mostra a **string literal** `@Microsoft.KeyVault(...)` | reference não resolveu (backend/Functions **sem system-assigned ligada**, ou a identidade **sem a role** no cofre) | ligar **System assigned = On** + atribuir **`Key Vault Secrets User`** à system-assigned do recurso (Fase 9.1); exigir status **Resolved** |
 | Secret do Container App não vira **Key Vault reference** | MI não anexada antes (landmine P-4), ou role não propagada | anexar `id-fifa2026-kv-reader` **antes** (Fase 3.2); aguardar a propagação do IAM |
 | Chatbot diz "chat indisponível" | `VITE_LLM_PROXY_URL` não setado no build | definir a Variable (= gateway) e re-rodar `acao=frontend` |
 | Chatbot **inventa** uma resposta de ação | alucinação de texto do LLM (function calling não é 100% infalível) | reforçar: a "promessa" no texto **não** é uma tool call; nenhuma escrita ocorre — não há tool de escrita |
@@ -808,3 +857,28 @@ Server=tcp:sql-dev-tk-cin-001.database.windows.net,1433;Database=FIFA2026Tickets
 > `[confirmar no Portal — R-6]` quando um app tem **system E user-assigned**, a string `Authentication=Active Directory Managed Identity` **sem** `User Id` pode resolver a identidade **errada**; se ambíguo, usar `User Id=<client-id>` **explícito**.
 
 **Smoke de menor-privilégio:** um `INSERT` via a MID do **McpServer** deve tomar **permissão negada** (ele é `db_datareader`-only).
+
+## Apêndice F — Caminho inline (só para quem NÃO blindou pelo cofre)
+
+> Só precisa disto quem **não** blindou os sensíveis pelo Key Vault (Fases 3/4/7) — ou quem quer ativar as chaves de fallback do chatbot. No caminho cofre (o das aulas), **pule este apêndice** (os sensíveis já vivem no Key Vault; nada a preencher no fork).
+
+**Secrets sensíveis do fork:**
+
+| Nome EXATO | Conteúdo | Usada em (ação) |
+|---|---|---|
+| `PHASE05_SQL_CONNECTION_STRING` | connection string ADO.NET do `FIFA2026Tickets` | mcp-server |
+| `PHASE06_SIGNALR_CONNECTION_STRING` | connection string do Azure SignalR | flow-events |
+| `GEMINI_API_KEY` | sua chave Gemini | mcp-server |
+| `GATEWAY_SHARED_SECRET` | **mesmo** valor do `gateway-admin-shared-secret` | mcp-server |
+| `GROQ_API_KEY` / `MISTRAL_API_KEY` *(opcionais)* | chaves de fallback | mcp-server |
+
+> ⚠️ **Cofre × workflow (sem refill):** se você blindou os sensíveis pelo Key Vault (Fases 3/4/7), **deixe o secret do fork vazio** — o deploy detecta o secret já existente no Container App e **não sobrescreve** a Key Vault reference. Se você **não** blindou pelo cofre, **preencha** o secret do fork (caminho inline). Escolha por segredo:
+
+| Secret do fork | Job | Se caminho COFRE | Se caminho INLINE |
+|---|---|---|---|
+| `PHASE05_SQL_CONNECTION_STRING` | `mcp-server` | **pode deixar vazio** — o deploy detecta o secret `sql-conn` já existente no Container App e **não sobrescreve** a Key Vault reference (só garante o env var `secretref:sql-conn`) | preencha |
+| `PHASE06_SIGNALR_CONNECTION_STRING` | `flow-events` | **pode deixar vazio** — o deploy detecta o secret `azure-signalr-conn` já existente e **não sobrescreve** a Key Vault reference | preencha |
+| `GEMINI_API_KEY` | `mcp-server` | pode deixar **vazio/ausente** (ausência = aviso, não erro); mantenha `gemini-key` como KV ref | preencha |
+| `GATEWAY_SHARED_SECRET` | `mcp-server` | pode deixar **vazio/ausente**; mantenha `gateway-secret` como KV ref | preencha |
+
+> Os **quatro** são condicionais: o job só **aborta** (`exit 1`) se o segredo não existir **nem** no fork **nem** como secret no Container App. Blindou pelo cofre → deixe vazio; não blindou → preencha. *(A consolidação cofre × inline num único caminho — antes débito residual — foi **resolvida em 2026-07-06**: o deploy detecta o secret existente e não re-exige refill.)*
